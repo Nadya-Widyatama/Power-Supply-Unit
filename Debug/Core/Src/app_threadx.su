@@ -1,0 +1,11 @@
+../Core/Src/app_threadx.c:102:6:App_ThreadX_Init	56	static
+../Core/Src/app_threadx.c:129:6:MX_ThreadX_Init	8	static
+../Core/Src/app_threadx.c:144:6:ADC_Reading	104	static
+../Core/Src/app_threadx.c:227:6:Power_Management	32	static
+../Core/Src/app_threadx.c:318:6:SoH_Management	80	static
+../Core/Src/app_threadx.c:472:6:Set_LED	24	static
+../Core/Src/app_threadx.c:490:6:Transmit_Data	232	static
+../Core/Src/app_threadx.c:514:6:Temperature_Reading	16	static
+../Core/Src/app_threadx.c:524:6:Beep_Beep	24	static
+../Core/Src/app_threadx.c:540:6:Save_Data	72	dynamic
+../Core/Src/app_threadx.c:581:6:Read_Data	32	static
