@@ -38,10 +38,10 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define THREAD_STACK_SIZE 2048
-#define Sensor_Current_Limit 20		//provide a value that corresponds to the sensor used
+#define Sensor_Current_Limit 30		//provide a value that corresponds to the sensor used
 #define BatteryCapacity1 1.0 //9.2 	//Measurement in units of Ah
 #define BatteryCapacity2 1.0 //3.31 //Measurement in units of Ah
-#define SoC_End_Discharge 80.0
+#define SoC_End_Discharge 20.0
 
 #define DS18B20_PIN GPIO_PIN_5
 #define DS18B20_PORT GPIOA
@@ -72,7 +72,8 @@ void Beep_Beep(uint8_t cycle, uint16_t delay1, uint16_t delay2);
 void Save_Data(void *value, uint32_t address, size_t size);
 void Read_Data(void *buffer, uint32_t address, size_t size);
 
-uint32_t SoC_Temp_current_time1, SoC_Temp_current_time2, SoC_prev_Temp_current_time1,SoC_prev_Temp_current_time2;
+uint32_t SoC_Temp_current_time1, SoC_Temp_current_time2,
+SoC_prev_Temp_current_time1,SoC_prev_Temp_current_time2;
 uint32_t address_SoH1 = 0x08000000, address_SoH2 = 0x08002000;
 uint32_t address_Cycle1 = 0x08004000, address_Cycle2 = 0x08006000;
 uint8_t SoH1, SoH2, st1 = 0, st2 = 0, activePowerSource = 1;
@@ -81,7 +82,6 @@ float AH_Restored1, AH_Consumed1, AH_Restored2, AH_Consumed2, ActualBatteryCapac
 float temperature, voltage1, current1, voltage2, current2, voltagecharge, SoC1 = 100, SoC2 = 100;
 float capacity_actual1, capacity_actual2, cycle_count1, cycle_count2;
 int setzerobatt1 = 0, setzerobatt2 = 0, setcharging1 = 0, setcharging2 = 0;
-//float temperature;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -152,7 +152,7 @@ void ADC_Reading(ULONG initial_input) {
 		currentdischargelimit = -19.5;
 	}
 	else if(Sensor_Current_Limit == 30){
-		sensitivity = 0.0665;
+		sensitivity = 0.06741;
 		currentdischargelimit = -29.5;
 	}
 
@@ -163,7 +163,7 @@ void ADC_Reading(ULONG initial_input) {
     	sumADC_current2 = 0;
 
     	/*starts collecting ADC readout data with DMA*/
-    	HAL_ADC_Start_DMA(&hadc1, adcBuffer, 5);
+    	HAL_ADC_Start_DMA(&hadc1, adcBuffer, 4);
     	for (int i = 0; i < 50; i++) {
     		sumADC_voltage1 += adcBuffer[0];
     		sumADC_voltage2 += adcBuffer[1];
@@ -197,24 +197,26 @@ void ADC_Reading(ULONG initial_input) {
     	voltage1 = (value_voltage1 * 14.6) / 1023;
     	voltage_current1 = (value_current1 * 3.253) / 1023;
     	/*converts voltage to battery current value 1*/
-    	current1 = ((voltage_current1 - 2.5) / sensitivity);
+    	current1 = ((voltage_current1 - 2.5121) / sensitivity);
 
     	/*convert digital value to voltage battery 2*/
     	voltage2 = (value_voltage2 * 14.6) / 1023;
     	voltage_current2 = (value_current2 * 3.253) / 1023;
     	/*converts voltage to battery current value 2*/
-    	current2 = ((voltage_current2 - 2.5) / sensitivity);
+    	current2 = ((voltage_current2 - 2.5153) / sensitivity);
 
     	/*ensure there is no current when the voltage is zero*/
-    	if(voltage1 == 0){
+    	if(voltage1 <= 1){
     		current1 = 0.0;
     	}
-    	if(voltage2 == 0){
+    	if(voltage2 <= 1){
     		current2 = 0.0;
     	}
 
+//    	printf("voltage_current1: %.4f | ", voltage_current1);
+//    	printf("voltage_current2: %.4f \n", voltage_current2);
     	/*protection in case of overcurrent*/
-    	if(current1 <= currentdischargelimit || current2 <= currentdischargelimit || temperature >= 50){
+    	if(current1 <= currentdischargelimit || current2 <= currentdischargelimit){
     		/*disconnects the power flow if the current exceeds the limit*/
     		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, 0);
     		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, 0);
@@ -231,18 +233,22 @@ void Power_Management(ULONG initial_input) {
 		SoC_Temp_current_time1 = tx_time_get();
 		if (SoC_Temp_current_time1 - SoC_prev_Temp_current_time1 >= 1000) {
 			CurrentFiltered1 = 0.2 * current1 + 0.8 * CurrentFiltered1;
-			if (current1 > 0.5){
+			if (current1 > 0.05){
 				AH_Restored1 += (CurrentFiltered1 / 3600);
-				st1 = 1;
+				if(current1 > 0.2){
+					st1 = 1;
+				}
 			}
-			else if (current1 < 0) {
+			else if (current1 < 0.05) {
 				if (setzerobatt1 == 1 && SoC1 == 100){
 					AH_Consumed1 = 0;
 					AH_Restored1 = 0;
 					setzerobatt1 = 0;
 				}
 				AH_Consumed1 -= (CurrentFiltered1 / 3600);
-				st1 = 0;
+				if(current1 < 0.1){
+					st1 = 0;
+				}
 			}
 			SoC1 = ((BatteryCapacity1 - AH_Consumed1 + AH_Restored1) / BatteryCapacity1) * 100;
 			if (SoC1 > 100.0) {
@@ -256,7 +262,7 @@ void Power_Management(ULONG initial_input) {
 
 		/*charging logic battery 1*/
 		if(SoC1 <= SoC_End_Discharge){
-			Beep_Beep(1,100,50);
+			//Beep_Beep(1,100,50);
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, 0);
 			/*power transfer process from battery 1 to battery 2*/
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, 1);
@@ -273,18 +279,22 @@ void Power_Management(ULONG initial_input) {
 		SoC_Temp_current_time2 = tx_time_get();
 		if (SoC_Temp_current_time2 - SoC_prev_Temp_current_time2 >= 1000) {
 			CurrentFiltered2 = 0.2 * current2 + 0.8 * CurrentFiltered2;
-			if(current2 > 0.5) {
+			if(current2 > 0.05) {
 				AH_Restored2 += (CurrentFiltered2 / 3600);
-				st2 = 1;
+				if(current2 > 0.2){
+					st2 = 1;
+				}
 			}
-			else if (current2 < 0) {
+			else if (current2 < 0.05) {
 				if (setzerobatt2 == 1 && SoC2 == 100){
 					AH_Consumed2 = 0;
 					AH_Restored2 = 0;
 					setzerobatt2 = 0;
 				}
 				AH_Consumed2 -= (CurrentFiltered2 / 3600);
-				st2 = 0;
+				if(current2 < 0.1){
+					st2 = 0;
+				}
 			}
 			SoC2 = ((BatteryCapacity2 - AH_Consumed2 + AH_Restored2) / BatteryCapacity2) * 100;
 			if (SoC2 > 100.0) {
@@ -298,7 +308,7 @@ void Power_Management(ULONG initial_input) {
 
 		/*charging logic battery 1*/
 		if(SoC2 <= SoC_End_Discharge){
-			Beep_Beep(1,100,50);
+			//Beep_Beep(1,100,50);
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, 0);
 			/*power transfer process from battery 2 to battery */
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, 1);
@@ -337,7 +347,6 @@ void SoH_Management(ULONG initial_input) {
 	Read_Data(&cycle_count1, address_Cycle1, sizeof(cycle_count1));
 	Read_Data(&SoH2, address_SoH2, sizeof(SoH2));
 	Read_Data(&cycle_count2, address_Cycle2, sizeof(cycle_count2));
-	Read_Data(&SoH1, address_SoH1, sizeof(SoH1));
 
 	while (1) {
 		/*calculating the stage of Healty (SoH) battery 1*/
@@ -473,6 +482,12 @@ void Set_LED(ULONG initial_input) {
 	Beep_Beep(2,100,50);
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, 1);
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+//	cycle_count2 = 0;
+//	Save_Data(&cycle_count2, address_Cycle1, sizeof(cycle_count2));
+//	Save_Data(&cycle_count2, address_Cycle2, sizeof(cycle_count2));
+//	SoH1 = 100;
+//	Save_Data(&SoH1, address_SoH1, sizeof(SoH1));
+//	Save_Data(&SoH1, address_SoH2, sizeof(SoH1));
 
 	while(1) {
 		for(int i = 0; i < 4095; i++){
